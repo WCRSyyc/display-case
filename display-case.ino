@@ -1,155 +1,181 @@
 /*
+WCRS Display Case
 
-WCRS Display Case Code
-Created by: Jason Nenniger
-Last Edit: Sunday April 19, 2015
+This sketch controls power to the display modules based on input from motion sensors
+using relays.  Actually heat sensors.  If there is no one around, the displays
+(except for the motion sensors) are powered down, then started up again when a
+warm body is detected.
+
+The display case contains a (set of) presentation to be watched, and potentially
+interacted with.  To reflect that, theatre concepts are used to name variables
+and functions.
 
 Relay Wiring:
-Digital Pin 4 - LED's
+Digital Pin 4 - LEDs
+ - this is an LED strip around inside bottom of the clear display cover.  It serves
+   to attract attention, and somewhat illuminate the display contents.
 Digital Pin 5 - Xylophone
 Digital Pin 6 - Line Follower
 Digital Pin 7 - Spatula Robot
 
+Except for the LEDs, each of the display sections is run by it's own Arduino and sketch.
+
 Motion Sensor Wiring:
-Digital Pin 2 - Right Motion Sensor (when looking at the front of the display)
-Digital Pin 3 - Left Motion Sensor (when looking at the front of the display)
+Digital Pin 2 - Port Motion Sensor (right when looking at the front of the display) (
+Digital Pin 3 - Starboard Motion Sensor (left when looking at the front of the display)
 
-
+Written and tested with:
+  Environment: Arduino 1.0.6 on Fedora 21
+  Hardware: Arduino Uno
 */
 
-int calibrationTime = 30;        
-long unsigned int lowIn;         
-long unsigned int pause = 300000;  
+// Constants, never modified while the sketch is running
 
-boolean lockLow = true;
-boolean takeLowTime;  
+unsigned int DBG_STATE = 0;// 0 turns debug messages off, higher increases verbosity
 
-int Sensor1Pin = 2;    //the digital pin connected to the PIR sensor's output
-int Sensor2Pin = 3;
-int ledPin = 13;
-int previousmillis = 0;
+// Currently there are only 2 sensors, but use an array to make it easy to handle more
+int motionPin[] = {2, 3};// Port, Starboard sensors
+int relayPin[] = {4, 5, 6, 7};// Output pins to control power relays
+// DEBUG NOTE: When testing sensors and short interval power cycling, only use the LED
+// sub-system
+//int relayPin = {4};
 
-boolean S1Active = false, S2Active = false;
+unsigned const int LED_PIN = 13;// current audience detected indicator
+unsigned const int PIR_COUNT = sizeof(motionPin) / sizeof(int);// Number of Passive Infrared Sensors
+unsigned const int STAGE_COUNT = sizeof(relayPin) / sizeof(int);// Number of acts/displays/features
+// The length of time to continue a presentation after the current audience leaves
+unsigned const long CONTINUE_TIME = 30000;// milliseconds (30 seconds)
+// The time to wait after applying power to the PIR sensors before taking actual
+// readings
+unsigned const int SETTLE_TIME = 30; // seconds
+
+// Global variables
+
+unsigned long curtainCall = 0;// Scheduled time to power down
+boolean actInProgress = false;// displays are [not] powered up
+
 
 void setup() {
+  if (DBG_STATE > 0) {
+    Serial.begin(9600); // Only used for logging debug messages
+  }
+  pinMode(LED_PIN, OUTPUT);
   setupRelays();
   setupSensors();
 }
 
 void loop() {
-  loopSensors();
-  //loopRelays();
+  unsigned long now = millis();
+
+  checkAudience(now);// updates curtainCall when an audience is present
+
+  if (actInProgress && now > curtainCall) {
+    // There has been no audience for awhile
+    ringDownCurtain(now);
+  } else if (!actInProgress && now < curtainCall) {
+    // An audience just arrived: start the show
+    raiseCurtain(now);
+  }
+}
+
+// Power up the displays
+void raiseCurtain(unsigned long refTime) {// time only used for debug logging
+  unsigned int idx;
+  for (idx = 0; idx < STAGE_COUNT; idx++) {
+    // Power up each of the feature presentations
+    digitalWrite(relayPin[idx], HIGH);
+  }
+  if (DBG_STATE > 2) {
+    Serial.print("Starting presentations at ");
+    Serial.println(refTime, DEC);
+  }
+}
+
+// Power down the active displays
+void ringDownCurtain(unsigned long refTime) {// time only used for debug logging
+  unsigned int idx;
+
+  for (idx = 0; idx < STAGE_COUNT; idx++) {
+    digitalWrite(relayPin[idx], LOW); // Turn power off
+  }
+  if (DBG_STATE > 2) {
+    Serial.print("End of the current act at ");
+    Serial.println(refTime, DEC);
+  }
+}
+
+// Check the heat / motion sensors, to see if there is any audience in range.
+// Update the future (global) curtain call time when an audience is present
+void checkAudience(unsigned long refTime) {
+  unsigned int idx;
+  boolean liveAudience = false;
+
+  for (idx = 0; idx < PIR_COUNT; idx++) {
+    if (digitalRead(motionPin[idx])) {
+      liveAudience = true;// Current sensor detected heat/motion
+      if (DBG_STATE > 8) {
+        Serial.print("Sensor on pin ");
+        Serial.print(motionPin[idx], DEC);
+        Serial.print(" detected audience at ");
+        Serial.println(refTime, DEC);
+      }
+    }
+  }
+
+  if (liveAudience) {
+    // Currently have an audience: push the curtain call further into the future
+    curtainCall = refTime + CONTINUE_TIME;// When to shut off, if no one shows up sooner
+  }
+  digitalWrite(LED_PIN, liveAudience);// Show when an audience is present
+
+  if (DBG_STATE > 2) {
+    if (!actInProgress && liveAudience) {
+      Serial.print("New audience detected at time ");
+      Serial.println(refTime, DEC);
+      Serial.print("Next curtain call at ");
+      Serial.println(curtainCall, DEC);
+    }
+  }
 }
 
 void setupRelays() {
-  Serial.begin(9600);
-  pinMode(4, OUTPUT);
-  pinMode(5, OUTPUT);
-  pinMode(6, OUTPUT);
-  pinMode(7, OUTPUT);
-  
-}
-
-void setupSensors(){
-  //Serial.begin(9600);
-  pinMode(Sensor1Pin, INPUT);
-  pinMode(Sensor2Pin, INPUT);
-  pinMode(ledPin, OUTPUT);
-  digitalWrite(Sensor1Pin, LOW);
-  digitalWrite(Sensor2Pin, LOW);
-  
-  Serial.print("calibrating sensor ");
-  for(int i = 0; i < calibrationTime; i++){
-    Serial.print(".");
-    delay(1000);
+  unsigned int idx;
+  for (idx = 0; idx < STAGE_COUNT; idx++) {
+    pinMode(relayPin[idx], OUTPUT);
+    digitalWrite(relayPin[idx], LOW); // Make sure power is off to start with
+    if (DBG_STATE > 3) {
+      Serial.print("Relay ");
+      Serial.print(idx);
+      Serial.print(" on pin ");
+      Serial.print(relayPin[idx]);
+      Serial.println(" initialized and off");
+    }
   }
-  Serial.println(" done");
-  Serial.println("SENSOR ACTIVE");
-  delay(50);
-}
-
-void loopSensors(){
-  
-  if(digitalRead(Sensor1Pin) == HIGH){
-    int sensor = 1;
-    Detected(sensor);
-  }
-  
-  if(digitalRead(Sensor1Pin) == LOW && S2Active == false){
-    int sensor = 1;
-    Undetected(sensor);
-  }
-  
-  if(digitalRead(Sensor2Pin) == HIGH){
-    int sensor = 2;
-    Detected(sensor);
-  }
-  
-  if(digitalRead(Sensor2Pin) == LOW && S1Active == false){
-    int sensor = 2;
-    Undetected(sensor);
+  if (DBG_STATE > 1) {
+    Serial.println("Stage control relays initialized");
   }
 }
 
-void Detected(int sensor) {
-  digitalWrite(ledPin, HIGH);   //the led visualizes the sensors output pin state
-  if(lockLow){
-    //makes sure we wait for a transition to LOW before any further output is made:
-    lockLow = false;            
-    
-    if(sensor == 1) {
-      S1Active = true;
-    }
-    
-    if(sensor == 2) {
-      S2Active = true;
-    }
-    Serial.println("---");
-    Serial.print("Sensor ");
-    Serial.print(sensor);
-    Serial.print(" detected motion at ");
-    Serial.print(millis()/1000);
-    Serial.println(" sec"); 
-    
-    digitalWrite(4, HIGH);
-    digitalWrite(5, HIGH);
-    digitalWrite(6, HIGH);
-    digitalWrite(7, HIGH);
-    
-    delay(50);
-  }         
-  takeLowTime = true;
-}
-
-void Undetected(int sensor) {
-  digitalWrite(ledPin, LOW);
-  
-  if(takeLowTime){
-    lowIn = millis();        
-    takeLowTime = false;
+void setupSensors() {
+  unsigned int idx;
+  for (idx = 0; idx < PIR_COUNT; idx++) {
+    pinMode(motionPin[idx], INPUT);
+    digitalWrite(motionPin[idx], LOW); // Turn off internal pull up resistor
   }
-  if(!lockLow && millis() - lowIn > pause){  
-    
-    if(sensor == 1) {
-      S1Active = false;
+
+  // What is this actually doing?  There is nothing here that does anything with the
+  // just initialized sensor pins.  It is **just** waiting.  Is this left over from
+  // some removed calbration code?  Is it not needed?  Do the sensors actually need
+  // a delay time in order to stabilize readings?
+  if (DBG_STATE > 0) {
+    Serial.print("calibrating sensor ");
+    for(int i = 0; i < SETTLE_TIME; i++){
+      Serial.print(".");
+      delay(1000);// one second
     }
-    
-    if(sensor == 2) {
-      S2Active = false;
-    }
-    
-    lockLow = true;
-    Serial.print("Sensor ");
-    Serial.print(sensor);    
-    Serial.print(" motion ended at ");
-    Serial.print((millis() - pause)/1000);
-    Serial.println(" sec");
-    
-    digitalWrite(4, LOW);
-    digitalWrite(5, LOW);
-    digitalWrite(6, LOW);
-    digitalWrite(7, LOW);
-    
-    delay(50);
+    Serial.println(" done");
+    Serial.println("SENSOR ACTIVE");
+  } else {
+    delay (SETTLE_TIME * 1000);
   }
 }
