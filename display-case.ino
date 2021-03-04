@@ -14,15 +14,14 @@ Motion Sensor Wiring:
 Digital Pin 2 - Right Motion Sensor (when looking at the front of the display)
 Digital Pin 3 - Left Motion Sensor (when looking at the front of the display)
 
-
 */
 
-int calibrationTime = 30;        
-long unsigned int lowIn;         
-long unsigned int pause = 300000;  
+int calibrationTime = 30;
+long unsigned int lowIn;
+long unsigned int pause = 300000;
 
 boolean lockLow = true;
-boolean takeLowTime;  
+boolean takeLowTime;
 
 int Sensor1Pin = 2;    //the digital pin connected to the PIR sensor's output
 int Sensor2Pin = 3;
@@ -47,7 +46,6 @@ void setupRelays() {
   pinMode(5, OUTPUT);
   pinMode(6, OUTPUT);
   pinMode(7, OUTPUT);
-  
 }
 
 void setupSensors(){
@@ -57,7 +55,7 @@ void setupSensors(){
   pinMode(ledPin, OUTPUT);
   digitalWrite(Sensor1Pin, LOW);
   digitalWrite(Sensor2Pin, LOW);
-  
+
   Serial.print("calibrating sensor ");
   for(int i = 0; i < calibrationTime; i++){
     Serial.print(".");
@@ -69,22 +67,22 @@ void setupSensors(){
 }
 
 void loopSensors(){
-  
+
   if(digitalRead(Sensor1Pin) == HIGH){
     int sensor = 1;
     Detected(sensor);
   }
-  
+
   if(digitalRead(Sensor1Pin) == LOW && S2Active == false){
     int sensor = 1;
     Undetected(sensor);
   }
-  
+
   if(digitalRead(Sensor2Pin) == HIGH){
     int sensor = 2;
     Detected(sensor);
   }
-  
+
   if(digitalRead(Sensor2Pin) == LOW && S1Active == false){
     int sensor = 2;
     Undetected(sensor);
@@ -95,12 +93,12 @@ void Detected(int sensor) {
   digitalWrite(ledPin, HIGH);   //the led visualizes the sensors output pin state
   if(lockLow){
     //makes sure we wait for a transition to LOW before any further output is made:
-    lockLow = false;            
-    
+    lockLow = false;
+
     if(sensor == 1) {
       S1Active = true;
     }
-    
+
     if(sensor == 2) {
       S2Active = true;
     }
@@ -109,47 +107,47 @@ void Detected(int sensor) {
     Serial.print(sensor);
     Serial.print(" detected motion at ");
     Serial.print(millis()/1000);
-    Serial.println(" sec"); 
-    
+    Serial.println(" sec");
+
     digitalWrite(4, HIGH);
     digitalWrite(5, HIGH);
     digitalWrite(6, HIGH);
     digitalWrite(7, HIGH);
-    
+
     delay(50);
-  }         
+  }
   takeLowTime = true;
 }
 
 void Undetected(int sensor) {
   digitalWrite(ledPin, LOW);
-  
+
   if(takeLowTime){
-    lowIn = millis();        
+    lowIn = millis();
     takeLowTime = false;
   }
-  if(!lockLow && millis() - lowIn > pause){  
-    
+  if(!lockLow && millis() - lowIn > pause){
+
     if(sensor == 1) {
       S1Active = false;
     }
-    
+
     if(sensor == 2) {
       S2Active = false;
     }
-    
+
     lockLow = true;
     Serial.print("Sensor ");
-    Serial.print(sensor);    
+    Serial.print(sensor);
     Serial.print(" motion ended at ");
     Serial.print((millis() - pause)/1000);
     Serial.println(" sec");
-    
+
     digitalWrite(4, LOW);
     digitalWrite(5, LOW);
     digitalWrite(6, LOW);
     digitalWrite(7, LOW);
-    
+
     delay(50);
   }
 }
